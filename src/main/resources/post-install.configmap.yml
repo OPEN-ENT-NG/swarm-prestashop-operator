@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prestashop-site-id-post-install-configmap
+data:
+  script.sh: |
+    #!/bin/sh
+    su www-data -s /bin/bash -c "./bin/console doctrine:query:sql \"UPDATE ps_shop_url SET virtual_uri='<<SITE_PATH>>';\""

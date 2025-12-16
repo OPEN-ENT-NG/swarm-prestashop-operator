@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prestashop-site-id
+  labels:
+    app.kubernetes.io/app: prestashop-site-id
+    app.kubernetes.io/instance: prestashop-site-id
+    app.kubernetes.io/component: website
+    app.kubernetes.io/part-of: prestashop
+    app.kubernetes.io/managed-by: prestashop-operator
+spec:
+  selector:
+    matchLabels:
+      app: prestashop-site-id
+  serviceName: prestashop-site-id
+  template:
+    metadata:
+      labels:
+        app: prestashop-site-id
+    spec:
+      containers:
+        - name: prestashop
+          image: prestashop/prestashop:8
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: DB_SERVER
+              value: db_host
+            - name: DB_NAME
+              value: db_name
+            - name: DB_USER
+              value: db_user
+            - name: DB_PASSWD
+              valueFrom:
+                secretKeyRef:
+                  name: db-password-secret-name
+                  key: db_password_secret_key
+          volumeMounts:
+            - mountPath: /etc/apache2/sites-enabled/000-default.conf
+              name: apache-config
+              subPath: httpd.conf
+            - mountPath: /tmp/post-install-scripts/script.sh
+              name: post-install-script
+              subPath: script.sh
+      volumes:
+        - name: apache-config
+          configMap:
+            name: prestashop-site-id-apache-configmap
+        - name: post-install-script
+          configMap:
+            name: prestashop-site-id-post-install-configmap
+            defaultMode: 0777
