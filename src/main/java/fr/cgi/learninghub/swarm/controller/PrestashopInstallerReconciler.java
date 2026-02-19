@@ -2,8 +2,10 @@ package fr.cgi.learninghub.swarm.controller;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import fr.cgi.learninghub.swarm.resource.Prestashop;
 import fr.cgi.learninghub.swarm.resource.PrestashopInstallerSpec;
@@ -34,6 +36,7 @@ public class PrestashopInstallerReconciler implements Reconciler<Prestashop> {
 
         PrestashopInstallerSpec.SiteSpec siteSpec = resource.getSpec().site();
         PrestashopInstallerSpec.DatabaseSpec dbSpec = resource.getSpec().database();
+        PrestashopInstallerSpec.StorageSpec storageSpec = resource.getSpec().storage();
 
         // Create the Apache ConfigMap if it doesn't exist
         ConfigMap apacheConfigMap = k8sClient.configMaps().inNamespace(namespace).withName(name + "-apache-configmap").get();
@@ -94,6 +97,42 @@ public class PrestashopInstallerReconciler implements Reconciler<Prestashop> {
             k8sClient.services().inNamespace(namespace).resource(psService).createOr(NonDeletingOperation::update);
         }
 
+        // Create the Prestashop PVC if it doesn't exist
+        String pvcName = name + "-prestashop-data";
+        PersistentVolumeClaim psPvc = k8sClient.persistentVolumeClaims().inNamespace(namespace).withName(pvcName).get();
+        if (psPvc == null) {
+            String size = storageSpec != null && storageSpec.size() != null ? storageSpec.size() : "1Gi";
+            List<String> accessModes = storageSpec != null && storageSpec.accessModes() != null && !storageSpec.accessModes().isEmpty()
+                ? storageSpec.accessModes()
+                : Collections.singletonList("ReadWriteOnce");
+
+            PersistentVolumeClaimBuilder pvcBuilder = new PersistentVolumeClaimBuilder()
+                .withNewMetadata()
+                .withName(pvcName)
+                .withNamespace(namespace)
+                .withOwnerReferences(Collections.singletonList(new OwnerReferenceBuilder()
+                    .withUid(resource.getMetadata().getUid())
+                    .withApiVersion(resource.getApiVersion())
+                    .withName(name)
+                    .withKind(resource.getKind())
+                    .build()
+                ))
+                .endMetadata()
+                .withNewSpec()
+                .withAccessModes(accessModes)
+                .withNewResources()
+                .addToRequests("storage", new Quantity(size))
+                .endResources()
+                .endSpec();
+
+            if (storageSpec != null && storageSpec.storageClassName() != null) {
+            pvcBuilder.editSpec().withStorageClassName(storageSpec.storageClassName()).endSpec();
+            }
+
+            psPvc = pvcBuilder.build();
+            k8sClient.persistentVolumeClaims().inNamespace(namespace).resource(psPvc).createOr(NonDeletingOperation::update);
+        }
+
         // Create the Prestashop StatefulSet if it doesn't exist
         StatefulSet psStatefulSet = k8sClient.apps().statefulSets().inNamespace(namespace).withName(name).get();
         if (psStatefulSet == null) {
@@ -116,6 +155,12 @@ public class PrestashopInstallerReconciler implements Reconciler<Prestashop> {
             psStatefulSet.getSpec().getTemplate().getSpec().getVolumes().forEach(volume -> {
                 if (volume.getConfigMap() != null)
                     volume.getConfigMap().setName(volume.getConfigMap().getName().replace("prestashop-site-id", name));
+                if ("prestashop-data".equals(volume.getName())) {
+                    volume.setEmptyDir(null);
+                    volume.setPersistentVolumeClaim(new PersistentVolumeClaimVolumeSourceBuilder()
+                            .withClaimName(pvcName)
+                            .build());
+                }
             });
 
             psStatefulSet.getSpec().getTemplate().getSpec().getContainers().getFirst().setEnv(Arrays.asList(
@@ -138,6 +183,76 @@ public class PrestashopInstallerReconciler implements Reconciler<Prestashop> {
             ));
 
             k8sClient.apps().statefulSets().inNamespace(namespace).resource(psStatefulSet).createOr(NonDeletingOperation::update);
+        } else {
+            boolean needsUpdate = false;
+            if (psStatefulSet.getSpec() != null
+                    && psStatefulSet.getSpec().getTemplate() != null
+                    && psStatefulSet.getSpec().getTemplate().getSpec() != null) {
+                PodSpec podSpec = psStatefulSet.getSpec().getTemplate().getSpec();
+                List<Volume> volumes = podSpec.getVolumes();
+                boolean hasDataVolume = false;
+
+                if (volumes != null) {
+                    for (Volume volume : volumes) {
+                        if ("prestashop-data".equals(volume.getName())) {
+                            hasDataVolume = true;
+                            String currentClaim = volume.getPersistentVolumeClaim() != null
+                                    ? volume.getPersistentVolumeClaim().getClaimName()
+                                    : null;
+                            if (!pvcName.equals(currentClaim)) {
+                                volume.setEmptyDir(null);
+                                volume.setPersistentVolumeClaim(new PersistentVolumeClaimVolumeSourceBuilder()
+                                        .withClaimName(pvcName)
+                                        .build());
+                                needsUpdate = true;
+                            }
+                        }
+                    }
+                }
+
+                if (!hasDataVolume) {
+                    if (volumes == null) {
+                        volumes = new ArrayList<>();
+                        podSpec.setVolumes(volumes);
+                    }
+                    volumes.add(new VolumeBuilder()
+                            .withName("prestashop-data")
+                            .withPersistentVolumeClaim(new PersistentVolumeClaimVolumeSourceBuilder()
+                                    .withClaimName(pvcName)
+                                    .build())
+                            .build());
+                    needsUpdate = true;
+                }
+
+                if (podSpec.getContainers() != null && !podSpec.getContainers().isEmpty()) {
+                    Container container = podSpec.getContainers().getFirst();
+                    List<VolumeMount> volumeMounts = container.getVolumeMounts();
+                    boolean hasMount = false;
+                    if (volumeMounts != null) {
+                        for (VolumeMount mount : volumeMounts) {
+                            if ("prestashop-data".equals(mount.getName())) {
+                                hasMount = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!hasMount) {
+                        if (volumeMounts == null) {
+                            volumeMounts = new ArrayList<>();
+                            container.setVolumeMounts(volumeMounts);
+                        }
+                        volumeMounts.add(new VolumeMountBuilder()
+                                .withName("prestashop-data")
+                                .withMountPath("/var/www/html")
+                                .build());
+                        needsUpdate = true;
+                    }
+                }
+            }
+
+            if (needsUpdate) {
+                k8sClient.apps().statefulSets().inNamespace(namespace).resource(psStatefulSet).createOr(NonDeletingOperation::update);
+            }
         }
 
         return UpdateControl.noUpdate();

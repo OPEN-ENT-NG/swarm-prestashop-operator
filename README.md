@@ -9,6 +9,26 @@ This project uses Quarkus, the Supersonic Subatomic Java Framework.
 
 If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
 
+## Prestashop storage (PVC)
+
+The operator now creates a PersistentVolumeClaim for Prestashop data and mounts it at `/var/www/html`.
+
+Default behavior:
+- PVC name: `<site-name>-prestashop-data`
+- Default size: `1Gi`
+- Default accessModes: `ReadWriteOnce`
+
+You can override these defaults with the `storage` section in the CR spec:
+
+```yaml
+spec:
+	storage:
+		size: 5Gi
+		storageClassName: fast-ssd
+		accessModes:
+			- ReadWriteOnce
+```
+
 ## Running the application in dev mode
 
 You can run your application in dev mode that enables live coding using:

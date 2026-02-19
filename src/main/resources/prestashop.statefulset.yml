@@ -43,6 +43,8 @@ spec:
             - mountPath: /tmp/post-install-scripts/script.sh
               name: post-install-script
               subPath: script.sh
+            - mountPath: /var/www/html
+              name: prestashop-data
       volumes:
         - name: apache-config
           configMap:
@@ -51,3 +53,5 @@ spec:
           configMap:
             name: prestashop-site-id-post-install-configmap
             defaultMode: 0777
+        - name: prestashop-data
+          emptyDir: {}
