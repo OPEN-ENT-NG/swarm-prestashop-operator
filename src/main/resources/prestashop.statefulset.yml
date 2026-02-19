@@ -18,6 +18,20 @@ spec:
       labels:
         app: prestashop-site-id
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: workload
+                operator: In
+                values:
+                - sites
+      tolerations:
+      - key: "workload"
+        operator: "Equal"
+        value: "sites"
+        effect: "NoSchedule"
       containers:
         - name: prestashop
           image: prestashop/prestashop:8
@@ -45,6 +59,13 @@ spec:
               subPath: script.sh
             - mountPath: /var/www/html
               name: prestashop-data
+          resources:
+            requests:
+              memory: "60Mi"
+              cpu: "10m"
+            limits:
+              memory: "800Mi"
+              cpu: "1000m"
       volumes:
         - name: apache-config
           configMap:

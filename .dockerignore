@@ -1,5 +1,30 @@
-*
-!target/*-runner
-!target/*-runner.jar
-!target/lib/*
-!target/quarkus-app/*
+# Ignore git files
+.git
+.gitignore
+
+# Ignore IDE files
+.idea
+.vscode
+*.iml
+*.swp
+*.swo
+
+# Ignore build artifacts (will be generated in Docker)
+target/
+*.class
+*.jar
+*.war
+
+# Ignore local config
+.env
+.env.local
+*.log
+
+# Ignore documentation
+README.md
+docs/
+
+# Ignore docker files
+docker/
+docker-compose*.yml
+Dockerfile.dev
