@@ -75,4 +75,5 @@ spec:
             name: prestashop-site-id-post-install-configmap
             defaultMode: 0777
         - name: prestashop-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: prestashop-site-id-prestashop-data
